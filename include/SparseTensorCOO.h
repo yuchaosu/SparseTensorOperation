@@ -7,10 +7,16 @@
 class SparseTensorCOO {
     public:
         SparseTensorCOO(int dim1, int dim2, int dim3);
+        
         void addElements(int i, int j, int k, double value);
+        
         void print() const;
 
-    private:
+        void sort();
+
+        void reorder(const std::vector<size_t>& idx);
+
+
         std::vector<int> coords1, coords2, coords3;
         std::vector<double> values;
         int dim1, dim2, dim3;
