@@ -8,7 +8,7 @@ class SparseTensorCOO {
     public:
         SparseTensorCOO(int dim1, int dim2, int dim3);
         
-        void addElements(int i, int j, int k, double value);
+        void addElement(int i, int j, int k, double value);
         
         void print() const;
 

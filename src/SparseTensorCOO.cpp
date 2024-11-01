@@ -7,9 +7,9 @@
     SparseTensorCOO::SparseTensorCOO(int dim1, int dim2, int dim3)
                     : dim1(dim1), dim2(dim2), dim3(dim3) {}
 
-    void SparseTensorCOO::addElements(int i, int j, int k, double value) {
+    void SparseTensorCOO::addElement(int i, int j, int k, double value) {
         //If the value is 0, return
-        if (value == 0)
+        if (value == 0.0)
             return;
 
         //Add non-zero elements
@@ -44,7 +44,7 @@
 
         reorder(idx);
 
-    }  
+    }
 
     void SparseTensorCOO::reorder(const std::vector<size_t>& idx) {
         std::vector<int> c1(coords1.size()), c2(coords2.size()), c3(coords3.size());
