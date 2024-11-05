@@ -1,5 +1,5 @@
 # Compiler and flags
-CXX = g++
+CXX = g++-14
 CXXFLAGS = -std=c++11 -fopenmp -Wall -O2 -Iinclude
 
 # Target executable
@@ -8,8 +8,7 @@ TARGET = bin/tensor_program
 # Source files
 SRCS = src/main.cpp \
        src/SparseTensorCOO.cpp \
-       src/HiCOOTensor.cpp \
-       src/TensorOperations.cpp
+       src/SparseTensorHiCOO.cpp 
 
 # Object files
 OBJS = $(SRCS:src/%.cpp=obj/%.o)
