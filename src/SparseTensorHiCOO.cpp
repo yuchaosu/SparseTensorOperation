@@ -8,6 +8,8 @@ SparseTensorHiCOO::SparseTensorHiCOO(int dim1, int dim2, int dim3, int blockSize
 
 
 void SparseTensorHiCOO::addElement(int i, int j, int k, double val) {
+    if (val == 0.0)
+        return;
     int blockI = i / blockSize;
     int blockJ = j / blockSize;
     int blockK = k / blockSize;
@@ -22,7 +24,7 @@ void SparseTensorHiCOO::addElement(int i, int j, int k, double val) {
 
     elemCoord1.emplace_back(elemI);
     elemCoord2.emplace_back(elemJ);
-    elemCoord2.emplace_back(elemK);
+    elemCoord3.emplace_back(elemK);
 
     values.emplace_back(val);
 }
