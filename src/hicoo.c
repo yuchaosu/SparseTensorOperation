@@ -92,6 +92,72 @@ int sptNewBlockIndexVector(sptBlockIndexVector *vec, uint64_t len, uint64_t cap)
     return 0;
 }
 
+int sptSetFibersForHiCOOTensor(
+    sptIndexVector *fiberidx, 
+    sptIndexVector *bptr, 
+    const sptSparseTensorHiCOO *X)
+{
+    int result;
+
+    // Initialize vectors
+    result = sptNewIndexVector(fiberidx, 0, 0);
+    if (result != 0) return -1;
+
+    result = sptNewIndexVector(bptr, 0, 0);
+    if (result != 0) {
+        sptFreeIndexVector(fiberidx);
+        return -1;
+    }
+
+    // Append initial value to block pointer
+    result = sptAppendIndexVector(bptr, 0);
+    if (result != 0) {
+        sptFreeIndexVector(fiberidx);
+        sptFreeIndexVector(bptr);
+        return -1;
+    }
+
+    uint64_t tmp_nnz = 0;
+    uint64_t lastidx = X->nnz;
+    uint64_t lastbidx = X->bptr.len - 1;
+
+    // Loop through blocks and nonzeros
+    for (uint64_t b = 0; b < X->bptr.len - 1; ++b) {
+        uint64_t b_begin = X->bptr.data[b];
+        uint64_t b_end = X->bptr.data[b + 1];
+        for (uint64_t z = b_begin; z < b_end; ++z) {
+            if (lastidx == X->nnz || /* replace with your comparison logic */ 0) {
+                lastidx = z;
+                lastbidx = b;
+                ++tmp_nnz;
+
+                result = sptAppendIndexVector(fiberidx, z);
+                if (result != 0) {
+                    sptFreeIndexVector(fiberidx);
+                    sptFreeIndexVector(bptr);
+                    return -1;
+                }
+            }
+        }
+        result = sptAppendIndexVector(bptr, tmp_nnz);
+        if (result != 0) {
+            sptFreeIndexVector(fiberidx);
+            sptFreeIndexVector(bptr);
+            return -1;
+        }
+    }
+
+    result = sptAppendIndexVector(fiberidx, X->nnz);
+    if (result != 0) {
+        sptFreeIndexVector(fiberidx);
+        sptFreeIndexVector(bptr);
+        return -1;
+    }
+
+    return 0;
+}
+
+
 int sptNewSparseTensorHiCOO(sptSparseTensorHiCOO *tsr, uint32_t nmodes, const uint32_t ndims[], uint64_t nnz, uint16_t sb_bits) {
     tsr->nmodes = nmodes;
     tsr->ndims = malloc(nmodes * sizeof *tsr->ndims);
@@ -151,17 +217,68 @@ int sptSparseTensorHiCOOMulVector(sptSparseTensorHiCOO *Y, sptSparseTensorHiCOO 
 
     return 0;
 }
-
-int sptSparseTensorHiCOOMulMatrix(sptSparseTensorHiCOO *Y, sptSparseTensorHiCOO *X, const sptValueVector *M, uint32_t mode) {
-    uint64_t i;
-
-    #pragma omp parallel for if (USE_OPENMP) schedule(static)
-    for (i = 0; i < X->nnz; ++i) {
-        Y->values.data[i] = X->values.data[i] * M->data[X->einds[mode].data[i]];
+int sptSparseTensorHiCOOMulMatrix(
+    sptSparseTensorHiCOO *Y, 
+    sptSparseTensorHiCOO *X, 
+    const sptValueVector *M, 
+    uint32_t mode) 
+{
+    if (mode >= X->nmodes) {
+        fprintf(stderr, "Shape mismatch in HiCOO SpTTM\n");
+        return -1;
     }
+    if (X->ndims[mode] != M->len / X->nmodes) {
+        fprintf(stderr, "Matrix dimensions mismatch\n");
+        return -1;
+    }
+
+    uint64_t stride = M->len / X->ndims[mode];
+    int result;
+
+    // Initialize fiber and block pointers
+    sptIndexVector fiberidx, bptr;
+    result = sptSetFibersForHiCOOTensor(&fiberidx, &bptr, X);
+    if (result != 0) return -1;
+
+    // Allocate output tensor
+    result = sptNewSparseTensorHiCOO(Y, X->nmodes, X->ndims, fiberidx.len - 1, X->sb_bits);
+    if (result != 0) {
+        sptFreeIndexVector(&fiberidx);
+        sptFreeIndexVector(&bptr);
+        return -1;
+    }
+
+    // Perform computation
+    #pragma omp parallel for
+    for (uint64_t i = 0; i < fiberidx.len - 1; ++i) {
+        uint64_t inz_begin = fiberidx.data[i];
+        uint64_t inz_end = fiberidx.data[i + 1];
+        for (uint64_t j = inz_begin; j < inz_end; ++j) {
+            uint64_t row_idx = X->einds[mode].data[j];
+            #pragma omp simd
+            for (uint64_t r = 0; r < stride; ++r) {
+                Y->values.data[i * stride + r] += X->values.data[j] * M->data[row_idx * stride + r];
+            }
+        }
+    }
+
+    // Free temporary structures
+    sptFreeIndexVector(&fiberidx);
+    sptFreeIndexVector(&bptr);
 
     return 0;
 }
+
+// int sptSparseTensorHiCOOMulMatrix(sptSparseTensorHiCOO *Y, sptSparseTensorHiCOO *X, const sptValueVector *M, uint32_t mode) {
+//     uint64_t i;
+
+//     #pragma omp parallel for if (USE_OPENMP) schedule(static)
+//     for (i = 0; i < X->nnz; ++i) {
+//         Y->values.data[i] = X->values.data[i] * M->data[X->einds[mode].data[i]];
+//     }
+
+//     return 0;
+// }
 
 void generateRandomMatrix(sptValueVector *matrix, uint64_t rows, uint64_t cols) {
     sptNewValueVector(matrix, rows * cols, rows * cols);
@@ -202,6 +319,34 @@ int sptSparseTensorHiCOOMulScalar(sptSparseTensorHiCOO *Y, sptSparseTensorHiCOO 
     return 0;
 }
 
+int loadTensorFromFile(sptSparseTensor *tensor, const char *filename, uint32_t nmodes, uint64_t nnz) {
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        perror("Error opening file");
+        return -1;
+    }
+
+    uint64_t nz = 0;
+    while (nz < nnz) {
+        for (uint32_t i = 0; i < nmodes; ++i) {
+            if (fscanf(fp, "%" SCNu64, &tensor->inds[i].data[nz]) != 1) {
+                fprintf(stderr, "Error reading index at line %" PRIu64 "\n", nz + 1);
+                fclose(fp);
+                return -1;
+            }
+        }
+        if (fscanf(fp, "%lf", &tensor->values.data[nz]) != 1) {
+            fprintf(stderr, "Error reading value at line %" PRIu64 "\n", nz + 1);
+            fclose(fp);
+            return -1;
+        }
+        nz++;
+    }
+
+    fclose(fp);
+    return 0;
+}
+
 int main() {
     sptSparseTensorHiCOO X, Y, Z;
     sptValueVector M, V;
@@ -231,9 +376,6 @@ int main() {
         return -1;
     }
 
-    // OpenMP 线程设置
-
-    //printf("threads used: %d\n", threads);
 
 
 
